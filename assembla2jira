@@ -1,0 +1,292 @@
+#!/usr/bin/env php
+<?php
+error_reporting( E_ALL );
+ini_set('display_errors', 1);
+ini_set('memory_limit', "1G");
+
+$shortOpts = "h::v::i:u:p:a::";
+
+$options = getopt($shortOpts);
+
+if (isset($options["h"])) {
+	showHelp();
+	exit(0);
+}
+
+if (!isset($options["a"]) || ($options["a"] === false) || is_array($options["a"])) {
+	$options["a"] = "";
+}
+
+
+if (!isset($options["i"]) || ($options["i"] === false) || is_array($options["i"])) {
+	print "ERROR: please specify input file\n";
+	exit(1);
+}
+
+if (!file_exists($options["i"] . "/dump.js")) {
+	print "ERROR: input file \"" . $options["i"] . "\" not found\n";
+	exit(1);
+}
+
+if (!isset($options["u"]) || ($options["u"] === false) || is_array($options["u"])) {
+	print "ERROR: please specify user map file\n";
+	exit(1);
+}
+
+if (!file_exists($options["u"])) {
+	print "ERROR: user map file \"" . $options["u"] . "\" not found\n";
+	exit(1);
+}
+
+if (!isset($options["p"]) || ($options["p"] === false) || is_array($options["p"])) {
+	print "ERROR: please specify project info file\n";
+	exit(1);
+}
+
+if (!file_exists($options["p"])) {
+	print "ERROR: project info file \"" . $options["u"] . "\" not found\n";
+	exit(1);
+}
+
+
+$dict = array();
+$data = array();
+$fields = array();
+
+$file = explode("\n", file_get_contents($options["i"] . "/dump.js"));
+
+foreach ($file as $lineNumber => $line) {
+	if (trim($line) === "") {
+		continue;
+	}
+
+	list($type, $val) = explode(" ", $line, 2);
+
+	//var_dump($type);
+
+	$testfields = explode(":", $type);
+	if (count($testfields) == 2) {
+		$fields = json_decode($val);
+		$dict[$testfields[0]] = $fields;
+		continue;
+		die("asdf");
+	}
+	// trim comma from end of type
+	$type = substr($type, 0, -1);
+
+	$frag = array();
+	foreach(json_decode($val) as $i => $v) {
+		$frag[$dict[$type][$i]] = $v;
+	}
+	$data[$type][] = $frag; 
+}
+
+$output = (object)array(
+	"users" => array(),
+	"links" => array(),
+	"projects" => array(),
+	);
+
+
+$userMap = json_decode(stripComments(file_get_contents($options["u"])));
+
+$output->users = array_values((array)$userMap);
+$output->projects[] = json_decode(stripComments(file_get_contents($options["p"])));
+
+
+$issuePrototype = (object)array(
+	"priority" => "Minor",
+	"status" => "Closed",
+	"issueType" => "Bug",
+	"resolution" => "Resolved",
+	// to fill in with assembla tickets:
+	"created" => "2012-08-31T15:59:02.161+0100",
+	"updated" => "2012-08-31T15:59:02.161+0100",
+	"reporter" => "",
+	"summary" => "",
+	"description" => "",
+	"externalId" => "",
+	"history" => array(),
+);
+
+//var_dump($data["tickets"]);
+
+// get comments by ticket ID
+$comments = array();
+foreach($data["ticket_comments"] as $comment) {
+	if (!isset($comments[$comment["ticket_id"]])) {
+		$comments[$comment["ticket_id"]] = array();
+	}
+	$comments[$comment["ticket_id"]][] = $comment;
+}
+
+// get documents by document ID
+$documentsById = array();
+foreach($data["documents"] as $document) {
+	if (!isset($documentsById[$document["id"]])) {
+		$documentsById[$document["id"]] = array();
+	}
+	$documentsById[$document["id"]] = $document;
+}
+
+$issues = array();
+
+foreach($data["tickets"] as $i => $ticket) {
+	//var_dump($ticket["completed_date"]);
+	$attachments = array();
+	$issues[$i] = clone $issuePrototype;
+
+	if (is_null($ticket["completed_date"])) {
+		unset($issues[$i]->status);
+		unset($issues[$i]->resolution);
+	}
+
+	$issues[$i]->created = $ticket["created_on"];
+	$issues[$i]->updated = $ticket["updated_at"];
+	$issues[$i]->reporter = getUser($ticket["reporter_id"]);
+	$issues[$i]->assignee = getUser($ticket["assigned_to_id"]);
+
+	if ($issues[$i]->assignee === null) {
+		unset($issues[$i]->assignee);
+	}
+
+
+
+	$issues[$i]->summary = $ticket["summary"];
+	$issues[$i]->description = autoLinkIssues($ticket["description"]) . "\n\n(imported by assembla2jira script)";
+	$issues[$i]->externalId = $ticket["number"];
+
+	$attachments = array_merge($attachments, getAttachmentIds($ticket["description"]));
+
+
+	$issueComments = array();
+	foreach($comments[$ticket["id"]] as $comment) {
+		if (strlen(trim($comment["comment"])) > 0) {
+			$c = (object)array(
+				"author" => getUser($comment["user_id"]),
+				"created" => $comment["created_on"],
+				"body" => "" . autoLinkIssues($comment["comment"])
+				);
+			$issueComments[] = $c;
+		}
+		$attachments = array_merge($attachments, getAttachmentIds($comment["comment"]));
+	}
+	$issues[$i]->comments = $issueComments;
+
+	$attachments = array_values(array_unique($attachments));
+	if (count($attachments) > 0) {
+		//var_dump($attachments);
+		$issues[$i]->attachments = getAttachments($attachments);
+		//var_dump($issues[$i]->attachments);
+	}
+
+
+}
+
+//die();
+$output->projects[0]->issues = $issues;
+
+print(json_encode($output));
+
+print "\n";
+exit(0);
+
+function showHelp() {
+	print <<<END
+# assembla2jira 
+  -i <path to import>         Directory to import from
+  -u <path to user map>       User map file (JSON)
+  -p <path to project info>   Project info file (JSON)
+  -a <attachment url prefix>  Attachment URL prefix
+  -h                          This help
+  -v                          Show version number
+
+END;
+}
+
+function stripComments($jsonString) {
+	$text = preg_replace('!/\*.*?\*/!s', '', $jsonString);
+	return preg_replace('/\n\s*\n/', "\n", $text);
+	return preg_replace("/(\/\*([\s\S]*?)\*\/)|(\/\/(.*)$)/gm", "", $jsonStrong);
+}
+
+function getUser($userId) {
+	global $userMap;
+	if ($userId === null) {
+		return null;
+	}
+
+	if (!isset($userMap->{$userId}->name)) {
+		print ("can't find user: $userId\n\n");
+		exit(1);
+	}
+
+	return $userMap->{$userId}->name;
+
+}
+
+function getAttachmentIds($text) {
+	global $options;
+	$retval = array();
+	$matches = array();
+
+	$regex = '/\[\[(file|image)\:(.*)\]\]/'; 
+
+	preg_match($regex, $text, $matches);
+
+	if (isset($matches[2])) {
+		//var_dump($matches[2]);
+
+		$retval[] = $matches[2];
+	}
+
+	return $retval;
+}
+
+function getFileUrl($file) {
+	global $options;
+	//var_dump($options);
+	$cwd = getcwd();
+	return $options["a"] . str_replace($cwd, "", realpath($file));
+}
+
+function getAttachments($attachmentIds) {
+	global $options;
+	global $documentsById;
+	$attachments = array();
+
+	foreach($attachmentIds as $i => $a) {
+
+		$cmd = 'find '.$options["i"].' | grep "'.$a.'"';
+		//print $cmd ."\n"; 
+		$res = explode("\n",`$cmd`);
+		//var_dump($res);
+		foreach($res as $f) {
+			if (strpos($f, "/$a")) {
+				//var_dump($documentsById[$a]);
+				$attachments[$i] = (object)array(
+					"name" => $documentsById[$a]["filename"],
+					"attacher" => getUser($documentsById[$a]["created_by"]),
+					"created" => $documentsById[$a]["created_at"],
+					"uri" => getFileUrl($f),
+					"description" => $documentsById[$a]["name"]
+				);
+			}
+		}
+	}
+	return array_values($attachments);
+}
+
+function autoLinkIssues($content) {
+	global $output;
+	$key = $output->projects[0]->key;
+
+	$pattern = "/#(\d+)/";
+	$replace = $key . '-$1';
+
+	$content = preg_replace($pattern, $replace, $content);
+
+	return $content;
+
+}
+

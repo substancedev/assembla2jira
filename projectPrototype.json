@@ -1,0 +1,19 @@
+{
+	"name": "A Sample Project",
+	"key": "ASM",
+	"description": "JSON file description",
+	"versions": [
+		{
+			"name": "1.0",
+			"released": true,
+			"releaseDate": "2012-08-31T15:59:02.161+0100"
+		},
+		{
+			"name": "2.0"
+		}
+	],
+	"components": [
+		"Component",
+		"AnotherComponent"
+	]
+}
