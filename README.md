@@ -35,6 +35,6 @@ $ assembla2jira -i <path to Assembla ticket export directory> \
                 -p <path to new JIRA project definition (JSON) \
                 -a"http://substancedev:substancedev@assemblaexport.substancedev.com" > jira-compatable.json
 ```
-- Import the generated JSON into JIRA to create project: https://<your JIRA url>/secure/admin/views/JsonSetupPage!default.jspa?externalSystem=com.atlassian.jira.plugins.jira-importers-plugin:jsonImporter
+- Import the generated JSON into JIRA to create project under Projects > Import External Project > Import from JSON
 - There *may* be import errors, JIRA will list them and you can see them via the "download a detailed log" link shown after an import.
 
