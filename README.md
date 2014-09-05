@@ -37,4 +37,3 @@ $ assembla2jira -i <path to Assembla ticket export directory> \
 ```
 - Import the generated JSON into JIRA to create project: https://<your JIRA url>/secure/admin/views/JsonSetupPage!default.jspa?externalSystem=com.atlassian.jira.plugins.jira-importers-plugin:jsonImporter
 - There *may* be import errors, JIRA will list them and you can see them via the "download a detailed log" link shown after an import.
-
